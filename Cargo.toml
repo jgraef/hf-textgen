@@ -1,0 +1,25 @@
+[package]
+name = "hf-textgen"
+version = "0.1.0"
+edition = "2021"
+authors = ["Janosch Gräf <janosch.graef@gmail.com>"]
+description = "Huggingface API client for text generation"
+repository = "https://github.com/jgraef/hf-textgen"
+# todo: add this once it's on docs.rs
+# documentation = ""
+keywords = ["api", "llm", "ai"]
+categories = ["science", "text-processing"]
+readme = "README.md"
+license = "MIT"
+
+[dependencies]
+tracing = "0.1"
+thiserror = "1.0"
+reqwest = { version = "0.11", features = ["json", "stream"] }
+futures = "0.3"
+serde = { version = "1", features = ["derive"] }
+eventsource-stream = "0.2"
+serde_json = "1"
+
+[dev-dependencies]
+tokio = { version = "1.35", features = ["rt", "macros"] }
