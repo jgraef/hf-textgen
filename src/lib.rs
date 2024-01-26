@@ -36,7 +36,6 @@ use eventsource_stream::{
     Eventsource,
 };
 use futures::{
-    stream::BoxStream,
     Stream,
     StreamExt,
 };
@@ -224,14 +223,14 @@ impl TextGeneration {
             .eventsource();
 
         Ok(TokenStream {
-            inner: stream.boxed(),
+            inner: Box::pin(stream),
         })
     }
 }
 
 /// A stream of tokens returned by the API.
 pub struct TokenStream {
-    inner: BoxStream<'static, Result<Event, EventStreamError<reqwest::Error>>>,
+    inner: Pin<Box<dyn Stream<Item = Result<Event, EventStreamError<reqwest::Error>>> + 'static>>,
 }
 
 impl TokenStream {
