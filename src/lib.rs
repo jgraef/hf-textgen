@@ -1,7 +1,7 @@
 //! An API client for the free [HuggingFace text generation API](https://huggingface.co/docs/api-inference/detailed_parameters#text-generation-task).
 //!
 //! # Example
-//! 
+//!
 //! ```
 //! # use std::{io::{stdout, Write}, error::Error};
 //! # use futures::stream::TryStreamExt;
@@ -10,10 +10,12 @@
 //! # async fn main() -> Result<(), Box<dyn Error>> {
 //! let api = Api::default();
 //! let model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
-//! 
-//! let token_stream = model.generate("[INST] Write a short poem about AI. [/INST]").await?;
+//!
+//! let token_stream = model
+//!     .generate("[INST] Write a short poem about AI. [/INST]")
+//!     .await?;
 //! let mut text_stream = token_stream.text();
-//! 
+//!
 //! while let Some(text) = text_stream.try_next().await? {
 //!     print!("{text}");
 //!     stdout().flush()?;
@@ -76,10 +78,11 @@ impl Api {
     const BASE_URL: &'static str = "https://api-inference.huggingface.co/";
 
     /// Creates a new API instance.
-    /// 
+    ///
     /// # Arguments
-    /// 
-    /// - `hf_token`: (optional) Your HuggingFace API token. (starts with `hf_`).
+    ///
+    /// - `hf_token`: (optional) Your HuggingFace API token. (starts with
+    ///   `hf_`).
     pub fn new(hf_token: Option<String>) -> Self {
         let mut builder = Client::builder();
 
@@ -124,10 +127,13 @@ pub struct TextGeneration {
     client: Client,
     url: String,
 
-    /// Integer to define the top tokens considered within the sample operation to create new text.
+    /// Integer to define the top tokens considered within the sample operation
+    /// to create new text.
     pub top_k: Option<usize>,
 
-    /// Float to define the tokens that are within the sample operation of text generation. Add tokens in the sample for more probable to least probable until the sum of the probabilities is greater than top_p.
+    /// Float to define the tokens that are within the sample operation of text
+    /// generation. Add tokens in the sample for more probable to least probable
+    /// until the sum of the probabilities is greater than top_p.
     pub top_p: Option<f32>,
 
     /// (Default: 1.0). Float (0.0-100.0). The temperature of the sampling
@@ -135,15 +141,20 @@ pub struct TextGeneration {
     /// score, 100.0 is getting closer to uniform probability.
     pub temparature: f32,
 
-    /// (Default: 250). The max number of tokens to generate. Although the HuggingFace API docs
-    /// state that this is limited to a max of 250 tokens, you might be able to
-    /// use higher values.
+    /// (Default: 250). The max number of tokens to generate. Although the
+    /// HuggingFace API docs state that this is limited to a max of 250
+    /// tokens, you might be able to use higher values.
     pub max_new_tokens: Option<usize>,
 
-    /// Float (0.0-100.0). The more a token is used within generation the more it is penalized to not be picked in successive generation passes.
+    /// Float (0.0-100.0). The more a token is used within generation the more
+    /// it is penalized to not be picked in successive generation passes.
     pub repetition_penalty: Option<f32>,
 
-    /// (Default: true) Boolean. If the model is not ready, wait for it instead of receiving 503. It limits the number of requests required to get your inference done. It is advised to only set this flag to true after receiving a 503 error as it will limit hanging in your application to known places.
+    /// (Default: true) Boolean. If the model is not ready, wait for it instead
+    /// of receiving 503. It limits the number of requests required to get your
+    /// inference done. It is advised to only set this flag to true after
+    /// receiving a 503 error as it will limit hanging in your application to
+    /// known places.
     pub use_cache: bool,
 }
 
@@ -306,10 +317,10 @@ struct TextGenerationEvent {
 pub struct Token {
     /// The model-internal ID for this token.
     pub id: u32,
-    
+
     /// Log-probability for this token.
     pub logprob: f32,
-    
+
     /// Textual representation of this token.
     pub text: String,
 
