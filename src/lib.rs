@@ -10,6 +10,8 @@
 //! # async fn main() -> Result<(), Box<dyn Error>> {
 //! let api = Api::default();
 //! let model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
+//! # let mut model = model;
+//! # model.max_new_tokens = Some(10);
 //!
 //! let token_stream = model
 //!     .generate("[INST] Write a short poem about AI. [/INST]")
@@ -26,6 +28,7 @@
 
 use std::{
     pin::Pin,
+    sync::Arc,
     task::{
         Context,
         Poll,
@@ -47,6 +50,7 @@ use reqwest::{
         HeaderValue,
     },
     Client,
+    Response,
 };
 use serde::{
     Deserialize,
@@ -68,14 +72,20 @@ pub enum Error {
     InvalidResponse,
 }
 
+#[derive(Debug)]
+struct ApiInner {
+    client: Client,
+    base_url: String,
+}
+
 /// A client for the HuggingFace text generation API.
 #[derive(Debug, Clone)]
 pub struct Api {
-    client: Client,
+    inner: Arc<ApiInner>,
 }
 
 impl Api {
-    const BASE_URL: &'static str = "https://api-inference.huggingface.co/";
+    pub const DEFAULT_BASE_URL: &'static str = "https://api-inference.huggingface.co";
 
     /// Creates a new API instance.
     ///
@@ -83,7 +93,7 @@ impl Api {
     ///
     /// - `hf_token`: (optional) Your HuggingFace API token. (starts with
     ///   `hf_`).
-    pub fn new(hf_token: Option<String>) -> Self {
+    fn new(base_url: Option<String>, hf_token: Option<String>) -> Self {
         let mut builder = Client::builder();
 
         let token = if let Some(token) = hf_token {
@@ -105,27 +115,61 @@ impl Api {
 
         let client = builder.build().expect("http client builder failed");
 
-        Self { client }
+        let base_url = base_url.unwrap_or_else(|| Self::DEFAULT_BASE_URL.to_owned());
+
+        Self {
+            inner: Arc::new(ApiInner { client, base_url }),
+        }
+    }
+
+    pub fn builder() -> ApiBuilder {
+        ApiBuilder::default()
     }
 
     /// Creates a [`TextGeneration`] object for the given `model_id`.
     pub fn text_generation(&self, model_id: &str) -> TextGeneration {
-        let url = format!("{}models/{}", Api::BASE_URL, model_id);
-        TextGeneration::new(self.client.clone(), url)
+        TextGeneration::new(self.clone(), model_id.to_owned())
     }
 }
 
 impl Default for Api {
     fn default() -> Self {
-        Self::new(None)
+        Self::new(None, None)
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ApiBuilder {
+    base_url: Option<String>,
+    hf_token: Option<String>,
+}
+
+impl ApiBuilder {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn with_base_url(mut self, base_url: String) -> Self {
+        self.base_url = Some(base_url);
+        self
+    }
+
+    pub fn with_hf_token(mut self, hf_token: String) -> Self {
+        self.hf_token = Some(hf_token);
+        self
+    }
+
+    pub fn build(self) -> Api {
+        Api::new(self.base_url, self.hf_token)
     }
 }
 
 /// A model endpoint for text generation.
 #[derive(Clone, Debug)]
 pub struct TextGeneration {
-    client: Client,
-    url: String,
+    api: Api,
+
+    model_id: String,
 
     /// Integer to define the top tokens considered within the sample operation
     /// to create new text.
@@ -159,10 +203,10 @@ pub struct TextGeneration {
 }
 
 impl TextGeneration {
-    fn new(client: Client, url: String) -> Self {
+    fn new(api: Api, model_id: String) -> Self {
         Self {
-            client,
-            url,
+            api,
+            model_id,
             top_k: None,
             top_p: None,
             temparature: 1.0,
@@ -172,14 +216,7 @@ impl TextGeneration {
         }
     }
 
-    /// Calls the HuggingFace text generation API to generate text given a
-    /// `prompt`. The `prompt` itself will not be included in the output.
-    ///
-    /// This returns a [`TokenStream`], which yields [`Token`]s with the
-    /// associated token ID and text. If you only need the text (and ignoring
-    /// special tokens), you can use [`TokenStream::text`] to get a stream that
-    /// yields strings.
-    pub async fn generate(&self, prompt: &str) -> Result<TokenStream, Error> {
+    async fn send_request(&self, prompt: &str, stream: bool) -> Result<Response, Error> {
         #[derive(Serialize)]
         struct Parameters {
             return_full_text: bool,
@@ -221,14 +258,33 @@ impl TextGeneration {
                 wait_for_model: true,
                 use_cache: self.use_cache,
             },
-            stream: true,
+            stream,
         };
 
-        let stream = self
+        let url = format!("{}/models/{}", self.api.inner.base_url, self.model_id);
+
+        let response = self
+            .api
+            .inner
             .client
-            .post(&self.url)
+            .post(&url)
             .json(&request)
             .send()
+            .await?;
+
+        Ok(response)
+    }
+
+    /// Calls the HuggingFace text generation API to generate text given a
+    /// `prompt`. The `prompt` itself will not be included in the output.
+    ///
+    /// This returns a [`TokenStream`], which yields [`Token`]s with the
+    /// associated token ID and text. If you only need the text (and ignoring
+    /// special tokens), you can use [`TokenStream::text`] to get a stream that
+    /// yields strings.
+    pub async fn generate(&self, prompt: &str) -> Result<TokenStream, Error> {
+        let stream = self
+            .send_request(prompt, true)
             .await?
             .bytes_stream()
             .eventsource();
@@ -237,6 +293,35 @@ impl TextGeneration {
             inner: Box::pin(stream),
         })
     }
+
+    pub async fn status(&self) -> Result<ModelStatus, Error> {
+        let url = format!("{}/status/{}", self.api.inner.base_url, self.model_id);
+        let status: ModelStatus = self.api.inner.client.get(&url).send().await?.json().await?;
+        Ok(status)
+    }
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub struct ModelStatus {
+    pub loaded: bool,
+    pub state: ModelState,
+    pub compute_type: ComputeType,
+    pub framework: String,
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[non_exhaustive]
+pub enum ModelState {
+    TooBig,
+    Loadable,
+    // todo: what other states are there?
+}
+
+#[derive(Copy, Clone, Debug, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum ComputeType {
+    Cpu,
+    Gpu,
 }
 
 /// A stream of tokens returned by the API.
@@ -347,5 +432,12 @@ mod tests {
             .collect::<String>()
             .await;
         assert_eq!(output, " In silicon valleys deep, where thoughts");
+    }
+
+    #[tokio::test]
+    async fn it_replies_with_a_status() {
+        let api = Api::default();
+        let model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
+        let _status = model.status().await.unwrap();
     }
 }
