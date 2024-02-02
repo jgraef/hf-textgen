@@ -153,7 +153,19 @@ impl Api {
             r#type: &'a str,
         }
 
-        let result: QuickSearchResult = self
+        #[derive(Debug, Deserialize)]
+        struct Model {
+            id: String,
+        }
+
+        #[derive(Debug, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            models: Vec<Model>,
+            models_count: usize,
+        }
+
+        let result: Response = self
             .inner
             .client
             .get("https://huggingface.co/api/quicksearch")
@@ -166,8 +178,10 @@ impl Api {
             .json()
             .await?;
 
+        let models = result.models.into_iter().map(|model| model.id).collect();
+
         Ok(QuickSearchResult {
-            models: result.models,
+            models,
             models_count: result.models_count,
         })
     }
@@ -348,7 +362,7 @@ impl Stream for ModelList {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct QuickSearchResult {
-    pub models: Vec<ModelInfo>,
+    pub models: Vec<String>,
     pub models_count: usize,
 }
 
