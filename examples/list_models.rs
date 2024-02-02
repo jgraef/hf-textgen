@@ -9,8 +9,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut models = api.list_models(
         Some("Mistral"),
         None,
-        &["text-generation", "text-generation-inference", "endpoints_compatible"],
-        None
+        &[
+            "text-generation",
+            "text-generation-inference",
+            "endpoints_compatible",
+        ],
+        None,
     );
 
     while let Some(model_info) = models.try_next().await? {

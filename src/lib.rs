@@ -145,6 +145,39 @@ impl Api {
     ) -> ModelList {
         ModelList::new(self.clone(), search, author, tags, limit)
     }
+
+    pub async fn quick_search(&self, search: &str) -> Result<QuickSearchResult, Error> {
+        #[derive(Debug, Serialize)]
+        struct Query<'a> {
+            q: &'a str,
+            r#type: &'a str,
+        }
+
+        #[derive(Debug, Serialize, Deserialize)]
+        #[serde(rename_all = "camelCase")]
+        struct Response {
+            pub models: Vec<ModelInfo>,
+            pub models_count: usize,
+        }
+
+        let result: Response = self
+            .inner
+            .client
+            .get("https://huggingface.co/api/quicksearch")
+            .query(&Query {
+                q: search,
+                r#type: "model",
+            })
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        Ok(QuickSearchResult {
+            models: result.models,
+            models_count: result.models_count,
+        })
+    }
 }
 
 impl Default for Api {
@@ -315,6 +348,12 @@ impl Stream for ModelList {
             return Poll::Ready(None);
         }
     }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct QuickSearchResult {
+    pub models: Vec<ModelInfo>,
+    pub models_count: usize,
 }
 
 /// A model endpoint for text generation.
