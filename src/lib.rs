@@ -146,11 +146,17 @@ impl Api {
         ModelList::new(self.clone(), search, author, tags, limit)
     }
 
-    pub async fn quick_search(&self, search: &str) -> Result<QuickSearchResult, Error> {
+    pub async fn quick_search(
+        &self,
+        search: &str,
+        limit: Option<usize>,
+    ) -> Result<QuickSearchResult, Error> {
         #[derive(Debug, Serialize)]
         struct Query<'a> {
             q: &'a str,
             r#type: &'a str,
+            #[serde(skip_serializing_if = "Option::is_none")]
+            limit: Option<usize>,
         }
 
         #[derive(Debug, Deserialize)]
@@ -172,6 +178,7 @@ impl Api {
             .query(&Query {
                 q: search,
                 r#type: "model",
+                limit,
             })
             .send()
             .await?
@@ -238,6 +245,8 @@ pub struct ModelList {
     api: Api,
     base_url: Url,
     next_url: Option<Url>,
+    count: usize,
+    limit: Option<usize>,
     send_future: Option<Pin<Box<dyn Future<Output = Result<Response, reqwest::Error>>>>>,
     response_future: Option<Pin<Box<dyn Future<Output = Result<Vec<ModelInfo>, reqwest::Error>>>>>,
     buffer: Vec<ModelInfo>,
@@ -263,6 +272,7 @@ impl ModelList {
             search: Option<&'a str>,
             author: Option<&'a str>,
             tags: Option<String>,
+            // note: this doesn't seem to limit at all. maybe it's per page?
             limit: Option<usize>,
         }
 
@@ -285,6 +295,8 @@ impl ModelList {
             api,
             base_url,
             next_url: None,
+            count: 0,
+            limit,
             send_future: Some(Box::pin(send_future)),
             response_future: None,
             buffer: vec![],
@@ -306,8 +318,14 @@ impl Stream for ModelList {
         }
 
         loop {
+            // check if we reached the limit
+            if self.limit.map(|l| self.count >= l).unwrap_or_default() {
+                return Poll::Ready(None);
+            }
+
             // first return everything we have buffered
             if let Some(item) = self.buffer.pop() {
+                self.count += 1;
                 return Poll::Ready(Some(Ok(item)));
             }
 
