@@ -153,14 +153,7 @@ impl Api {
             r#type: &'a str,
         }
 
-        #[derive(Debug, Serialize, Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Response {
-            pub models: Vec<ModelInfo>,
-            pub models_count: usize,
-        }
-
-        let result: Response = self
+        let result: QuickSearchResult = self
             .inner
             .client
             .get("https://huggingface.co/api/quicksearch")
@@ -216,8 +209,11 @@ impl ApiBuilder {
 #[serde(rename_all = "camelCase")]
 pub struct ModelInfo {
     pub id: String,
+    #[serde(default)]
     pub likes: usize,
+    #[serde(default)]
     pub downloads: usize,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub pipeline_tag: Option<String>,
     pub library_name: Option<String>,
