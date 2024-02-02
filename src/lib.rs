@@ -41,13 +41,17 @@ use eventsource_stream::{
     Eventsource,
 };
 use futures::{
+    Future,
+    FutureExt,
     Stream,
     StreamExt,
 };
 use reqwest::{
     header::{
         self,
+        HeaderMap,
         HeaderValue,
+        LINK,
     },
     Client,
     Response,
@@ -56,6 +60,7 @@ use serde::{
     Deserialize,
     Serialize,
 };
+use url::Url;
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {
@@ -130,6 +135,16 @@ impl Api {
     pub fn text_generation(&self, model_id: &str) -> TextGeneration {
         TextGeneration::new(self.clone(), model_id.to_owned())
     }
+
+    pub fn list_models(
+        &self,
+        search: Option<&str>,
+        author: Option<&str>,
+        tags: &[&str],
+        limit: Option<usize>,
+    ) -> ModelList {
+        ModelList::new(self.clone(), search, author, tags, limit)
+    }
 }
 
 impl Default for Api {
@@ -161,6 +176,144 @@ impl ApiBuilder {
 
     pub fn build(self) -> Api {
         Api::new(self.base_url, self.hf_token)
+    }
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelInfo {
+    pub id: String,
+    pub likes: usize,
+    pub downloads: usize,
+    pub tags: Vec<String>,
+    pub pipeline_tag: Option<String>,
+    pub library_name: Option<String>,
+    pub created_at: String,
+}
+
+pub struct ModelList {
+    api: Api,
+    base_url: Url,
+    next_url: Option<Url>,
+    send_future: Option<Pin<Box<dyn Future<Output = Result<Response, reqwest::Error>>>>>,
+    response_future: Option<Pin<Box<dyn Future<Output = Result<Vec<ModelInfo>, reqwest::Error>>>>>,
+    buffer: Vec<ModelInfo>,
+}
+
+impl ModelList {
+    pub fn new(
+        api: Api,
+        search: Option<&str>,
+        author: Option<&str>,
+        tags: &[&str],
+        limit: Option<usize>,
+    ) -> Self {
+        let tags = if tags.is_empty() {
+            None
+        }
+        else {
+            Some(tags.join(","))
+        };
+
+        #[derive(Debug, Serialize)]
+        struct Query<'a> {
+            search: Option<&'a str>,
+            author: Option<&'a str>,
+            tags: Option<String>,
+            limit: Option<usize>,
+        }
+
+        let url = "https://huggingface.co/api/models";
+        let send_future = api
+            .inner
+            .client
+            .get(url)
+            .query(&Query {
+                search,
+                author,
+                tags,
+                limit,
+            })
+            .send();
+
+        let base_url = Url::parse(url).unwrap();
+
+        Self {
+            api,
+            base_url,
+            next_url: None,
+            send_future: Some(Box::pin(send_future)),
+            response_future: None,
+            buffer: vec![],
+        }
+    }
+}
+
+impl Stream for ModelList {
+    type Item = Result<ModelInfo, Error>;
+
+    fn poll_next(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        fn parse_link_header(headers: &HeaderMap, base_url: &Url) -> Option<Url> {
+            let link_header = headers.get(LINK)?.to_str().ok()?;
+            let link_header = http_link::parse_link_header(link_header, base_url).ok()?;
+            let link = link_header
+                .into_iter()
+                .find_map(|link| (link.rel == "next").then(move || link.target))?;
+            Some(link)
+        }
+
+        loop {
+            // first return everything we have buffered
+            if let Some(item) = self.buffer.pop() {
+                return Poll::Ready(Some(Ok(item)));
+            }
+
+            // send the request
+            if let Some(send_future) = &mut self.send_future {
+                match send_future.poll_unpin(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(error)) => {
+                        self.send_future = None;
+                        return Poll::Ready(Some(Err(error.into())));
+                    }
+                    Poll::Ready(Ok(response)) => {
+                        self.send_future = None;
+                        self.next_url = parse_link_header(response.headers(), &self.base_url);
+                        self.response_future = Some(Box::pin(response.json()));
+                    }
+                }
+            }
+
+            // wait for response and parse it
+            if let Some(response_future) = &mut self.response_future {
+                match response_future.poll_unpin(cx) {
+                    Poll::Pending => return Poll::Pending,
+                    Poll::Ready(Err(error)) => {
+                        self.response_future = None;
+                        return Poll::Ready(Some(Err(error.into())));
+                    }
+                    Poll::Ready(Ok(response)) => {
+                        self.response_future = None;
+                        assert!(self.buffer.is_empty());
+                        self.buffer = response;
+                        self.buffer.reverse();
+
+                        // we continue here, to pull the first item from the buffer
+                        continue;
+                    }
+                }
+            }
+
+            // start the next request
+            if let Some(next_url) = self.next_url.take() {
+                self.send_future = Some(Box::pin(self.api.inner.client.get(next_url).send()));
+                continue;
+            }
+
+            // if we end up here, the buffer is empty, no future is set, and we don't have a
+            // next url
+            return Poll::Ready(None);
+        }
     }
 }
 
