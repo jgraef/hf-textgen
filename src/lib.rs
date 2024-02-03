@@ -490,7 +490,8 @@ impl TextGeneration {
             .post(&url)
             .json(&request)
             .send()
-            .await?;
+            .await?
+            .error_for_status()?;
 
         Ok(response)
     }
