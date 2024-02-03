@@ -14,7 +14,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             "text-generation-inference",
             "endpoints_compatible",
         ],
-        None,
+        Some(10),
     );
 
     while let Some(model_info) = models.try_next().await? {
