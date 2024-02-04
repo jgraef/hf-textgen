@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
 
     let token_stream = model
-        .generate("[INST] Write a short poem about AI. [/INST]")
+        .generate_stream("[INST] Write a short poem about AI. [/INST]")
         .await?;
     let mut text_stream = token_stream.text();
 

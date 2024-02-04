@@ -14,7 +14,7 @@
 //! # model.max_new_tokens = Some(10);
 //!
 //! let token_stream = model
-//!     .generate("[INST] Write a short poem about AI. [/INST]")
+//!     .generate_stream("[INST] Write a short poem about AI. [/INST]")
 //!     .await?;
 //! let mut text_stream = token_stream.text();
 //!
@@ -496,6 +496,16 @@ impl TextGeneration {
         Ok(response)
     }
 
+    pub async fn generate(&self, prompt: &str) -> Result<String, Error> {
+        #[derive(Deserialize)]
+        struct Response {
+            generated_text: String,
+        }
+
+        let [response]: [Response; 1] = self.send_request(prompt, false).await?.json().await?;
+        Ok(response.generated_text)
+    }
+
     /// Calls the HuggingFace text generation API to generate text given a
     /// `prompt`. The `prompt` itself will not be included in the output.
     ///
@@ -503,7 +513,7 @@ impl TextGeneration {
     /// associated token ID and text. If you only need the text (and ignoring
     /// special tokens), you can use [`TokenStream::text`] to get a stream that
     /// yields strings.
-    pub async fn generate(&self, prompt: &str) -> Result<TokenStream, Error> {
+    pub async fn generate_stream(&self, prompt: &str) -> Result<TokenStream, Error> {
         let stream = self
             .send_request(prompt, true)
             .await?
@@ -644,7 +654,7 @@ mod tests {
         let mut model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
         model.max_new_tokens = Some(10);
         let stream = model
-            .generate("[INST] Write a short poem about AI. [/INST]")
+            .generate_stream("[INST] Write a short poem about AI. [/INST]")
             .await
             .unwrap();
         let output = stream
