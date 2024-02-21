@@ -12,7 +12,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let api = Api::default();
     let model = api.text_generation("mistralai/Mistral-7B-Instruct-v0.2");
 
-    let token_stream = model.generate("[INST] Write a short poem about AI. [/INST]").await?;
+    let token_stream = model.generate_stream("[INST] Write a short poem about AI. [/INST]").await?;
     let mut text_stream = token_stream.text();
 
     while let Some(text) = text_stream.try_next().await? {
